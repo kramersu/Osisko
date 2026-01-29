@@ -108,11 +108,12 @@ mergers <- mergePairs(dadaFs, derepFs, dadaRs, derepRs, verbose=TRUE)
 names(mergers)<-sample.names[exists]
 seqtab <- makeSequenceTable(mergers)
 dim(seqtab)
-table(nchar(getSequences(seqtab)))#one peak at 148, but also much smaller or longer fragments. Keep all
+table(nchar(getSequences(seqtab)))#keep all below 143
 
 seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+seqtab2<-seqtab.nochim[,nchar(colnames(seqtab.nochim)) %in% 40:143]
 
-sum(seqtab.nochim)/sum(seqtab) # 99.9% of reads remain
+sum(seqtab2)/sum(seqtab) # 99.6% of reads remain
 
 getN <- function(x) sum(getUniques(x))
 out_ex<-row.names(out)[exists]
@@ -123,25 +124,26 @@ track <- cbind(out2, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers,
 
 colnames(track)<-c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim" )
 
-save.image(file = "../dada2_pro_trnL_workspace1.RData")
+save.image(file = "dada2_pro_trnL_workspace1.RData")
 
 #trnL database found at: https://ucedna.com/reference-databases-for-metabarcoding
 
 
 #handover to phyloseq
 library(phyloseq)
-ps_base<-phyloseq(otu_table(seqtab.nochim,taxa_are_rows=FALSE))
+ps_base<-phyloseq(otu_table(seqtab2,taxa_are_rows=FALSE))
 dna<-Biostrings::DNAStringSet(taxa_names(ps_base))
 taxa_names(ps_base)<-paste0("ASV",seq(ntaxa(ps_base)))
 names(dna)<-taxa_names(ps_base)
 ps_base<-merge_phyloseq(ps_base,dna)
 
-ps_base %>%refseq() %>%Biostrings::writeXStringSet("../trnL.fa", append=FALSE,compress=FALSE, compression_level=NA, format="fasta")
+ps_base %>%refseq() %>%Biostrings::writeXStringSet("trnL.fa", append=FALSE,compress=FALSE, compression_level=NA, format="fasta")
 
-tax<-read.csv("../results/trnL_tax_match_processed.csv")
+#new tax match by blasting against refseq, obtaining concensus from best hits (highest score) of up to 100 hits
+tax<-read.csv("../results/trnL_tax_match_new.csv")
 names<-tax$seqid
 tax$seqid<-NULL
 tax<-tax_table(tax)
 row.names(tax)<-names
-colnames(tax)<-c("Phylum","Class","Order","Family","Genus","Species")
+colnames(tax)<-c("Phylum","Class","Order","Family","Genus")
 tax_table(ps_base)<-tax

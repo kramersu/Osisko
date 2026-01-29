@@ -8,13 +8,11 @@ library(phyloseq)
 library(phytools)
 library(ggtree)
 library(pcaMethods)
-library(lavaan)
 library(lme4)
-library(ggord)
 library(microViz)
-library(TITAN2)
+library(ggplot2)
+library(randomForest)
 library(cowplot)
-library(ggpubr)
 
 path<-c("D:\\Marta/coi/results")
 setwd("D:/Marta/coi/scripts")
@@ -31,160 +29,311 @@ plot_bar(ps_base,fill="Class",title="All ASVs")#lots of hsa contamination in lak
 
 
 ps_clean1<-subset_taxa(ps_base,!(Order=="Primates_9443"))#remove hsa contamination, 120 ASVs remain
-ps_cont<-subset_taxa(ps_clean1,Order=="Primates_9443")
+ps_clean1<-prune_samples(sample_sums(ps_clean1)>600,ps_clean1)#22 samples remain
 
 plot_bar(ps_clean1,fill="Class",title="cleaned data")
-
-ps_clean2<-prune_samples(sample_sums(ps_clean1)>0,ps_clean1)#24 samples remain
+plot_bar(ps_clean1,fill="Order",title="cleaned data")
 
 meta<-read.csv("../DB/eDNA_metadata.csv",h=T)
-row.names(meta)<-meta$Name
-
-sample_data(ps_clean2)<-meta
-ps_clean3<-subset_samples(ps_clean2,Name !="BlankpcrCES3")
-ps_clean4<-subset_samples(ps_clean3,Name !="OSIL_2023_D_13b")
+row.names(meta)<-meta$Id_sample
+sample_data(ps_clean1)<-meta
 
 #alpha diversity analysis
-set.seed(67387)
-psrare<-rarefy_even_depth(ps_clean4,sample.size=3830)#94 taxa in 22 samples left
+set.seed(684)
+psrare<-rarefy_even_depth(ps_clean1,sample.size=min(sample_sums(ps_clean1)))#87 taxa in 22 samples left
 ps_alpha_div <- estimate_richness(psrare, split = TRUE, measure = "Shannon")
-meta<-merge(meta,ps_alpha_div,by=0)
+ps_alpha_chao <- estimate_richness(ps_clean1, split = TRUE, measure = "Chao1")
+ps_alpha_simp <- estimate_richness(ps_clean1, split = TRUE, measure = "Simpson")
+alpha_div<-cbind(ps_alpha_div,ps_alpha_chao,ps_alpha_simp)
+meta<-merge(meta,alpha_div,by=0)
 
-boxplot(Shannon~Lake+Site,meta)
-fit<-aov(Shannon~Lake*Site,meta)
-anova(fit)#lake significant: Dufay significantly higher
+boxplot(Shannon~mine_open,meta)
+boxplot(Shannon~pre_post,meta)
+wilcox.test(Shannon~mine_open,meta)#sig lower in yes category
+wilcox.test(Shannon~pre_post,meta)#ns
+wilcox.test(Shannon~Site,meta)#sig
+boxplot(Shannon~Site,meta)#Dufay has higher diversity
+wilcox.test(Shannon~Env,meta)#ns
+sh<-ggplot(data=meta,aes(mine_open,Shannon))+geom_boxplot()+theme_bw()
+ch<-ggplot(data=meta,aes(mine_open,Chao1))+geom_boxplot()+theme_bw()
+si<-ggplot(data=meta,aes(mine_open,Simpson))+geom_boxplot()+theme_bw()
+plot_grid(sh,ch,si,labels=c("A","B","C"))
 
-fit<-aov(Shannon~Combo,meta)
-anova(fit)#marginal
+wilcox.test(Chao1~mine_open,meta)#sig.
+wilcox.test(Chao1~pre_post,meta)#marginal
+wilcox.test(Chao1~Site,meta)#sig
+wilcox.test(Chao1~Env,meta)#ns
+boxplot(Chao1~mine_open,meta)
+boxplot(Chao1~Site,meta)
 
-fit<-lm(Shannon~Min_Depth,meta)
+wilcox.test(Simpson~mine_open,meta)#sig
+wilcox.test(Simpson~pre_post,meta)#ns
+wilcox.test(Simpson~Site,meta)#sig
+wilcox.test(Simpson~Env,meta)#ns
+boxplot(Simpson~mine_open,meta)
+
+ggplot(meta,aes(x=Year,y=Shannon,color=ID_Site,shape=mine_open))+
+  geom_point()+theme_bw()+geom_smooth(method="lm",se=FALSE)+
+  facet_wrap(~ID_Site,scales="free")
+
+ggplot(meta,aes(x=Year,y=Shannon,color=ID_Site,shape=mine_open))+
+  geom_point()+theme_bw()+geom_smooth(method="lm",se=FALSE)
+
+ggplot(meta,aes(x=Year,y=Chao1,color=ID_Site,shape=mine_open))+
+  geom_point()+theme_bw()+geom_smooth(method="lm",se=FALSE)+
+  facet_wrap(~ID_Site,scales="free")
+
+ggplot(meta,aes(x=Year,y=Chao1,color=ID_Site,shape=mine_open))+
+  geom_point()+theme_bw()+geom_smooth(method="lm",se=FALSE)
+
+ggplot(meta,aes(x=Year,y=Simpson,color=ID_Site,shape=mine_open))+
+  geom_point()+theme_bw()+geom_smooth(method="lm",se=FALSE)+
+  facet_wrap(~ID_Site,scales="free")
+
+ggplot(meta,aes(x=Year,y=Simpson,color=ID_Site,shape=mine_open))+
+  geom_point()+theme_bw()+geom_smooth(method="lm",se=FALSE)
+
+fit<-lm(Shannon~Year*ID_Site,meta)
 summary(fit)#ns
 
-ggplot(meta,aes(x=Min_Depth,y=Shannon,color=Lake))+geom_point()+geom_smooth(method="lm")
+fit<-lm(Chao1~Year*ID_Site,meta)
+summary(fit)#ns
 
-ggplot(meta,aes(x=Min_Depth,y=Shannon,color=Lake,shape=Site))+geom_point()+geom_smooth(method="lm")
+fit<-lm(Simpson~Year*ID_Site,meta)
+summary(fit)#ns
 
-fit<-lm(Shannon~Treatment,meta)
-summary(fit)#significant, exposure has higher diversity
-boxplot(Shannon~Treatment,meta)
-
-DD<-subset(meta,Combo=="Dufay_Deep")
+DD<-subset(meta,ID_Site=="DUF_DEEP")
 DD<-DD[order(DD$Year),]
-DL<-subset(meta,Combo=="Dufay_Littoral")
+DL<-subset(meta,ID_Site=="DUF_LIT")
 DL<-DL[order(DL$Year),]
-OD<-subset(meta,Combo=="Osisko_Deep")
-OL<-subset(meta,Combo=="Osisko_Littoral")
+OD<-subset(meta,ID_Site=="OSI_DEEP")
+OD<-OD[order(OD$Year),]
+OL<-subset(meta,ID_Site=="OSI_LIT")
+OL<-OL[order(OL$Year),]
 
-
-fit<-lm(Shannon~Min_Depth,OD)
+fit<-lm(Shannon~Year,OD)
+summary(fit)#ns
+fit<-lm(Chao1~Year,OD)
+summary(fit)#ns
+fit<-lm(Simpson~Year,OD)
 summary(fit)#ns
 
-fit<-lm(Shannon~Min_Depth,OL)
+fit<-lm(Shannon~Year,OL)
+summary(fit)#ns
+fit<-lm(Chao1~Year,OL)
+summary(fit)#ns
+fit<-lm(Simpson~Year,OL)
 summary(fit)#ns
 
 fit<-lm(Shannon~Year,DD)
 summary(fit)#ns
-plot(Shannon~Year,DD,type='b')
+fit<-lm(Chao1~Year,DD)
+summary(fit)#ns
+fit<-lm(Simpson~Year,DD)
+summary(fit)#ns
 
 fit<-lm(Shannon~Year,DL)
 summary(fit)#ns
-plot(Shannon~Year,DL,type='b')
-
-fit<-lm(Shannon~Treatment,DL)
+fit<-lm(Chao1~Year,DL)
+summary(fit)#ns
+fit<-lm(Simpson~Year,DL)
 summary(fit)#ns
 
 #beta diversity analysis
-ps_clean5<-tax_filter(ps_clean4,min_prevalence=3,prev_detection_threshold=5)#26 taxa remain
-exclude<-c("DUFD_2023_B_13b","OSID_2023_A_11b","OSID_2023_A_19b","OSID_2023_A_9b")#samples with 0 or very low counts to remove
-ps_clean6<-subset_samples(ps_clean5,!(Name %in% exclude))
-beta<-transform_sample_counts(ps_clean6,function(x) x/sum(x))#18 samples remain
+beta<-transform_sample_counts(ps_clean1,function(x) x/sum(x))
 
 tabred<-otu_table(beta)
-hellinger<-decostand(tabred,method="hellinger")
-meta2<-subset(meta,meta$Name %in% row.names(tabred))
-adonis_model <- adonis2(hellinger~Combo,data=meta2, permutations = 999)
-adonis_model#significant
+bc<-vegdist(tabred,method="bray")
+meta$Id_sample==row.names(tabred)#assume order of samples is the same
+adonis_model <- adonis2(bc~mine_open,data=meta, permutations = 999)
+adonis_model#marginal
 
-adonis_model <- adonis(hellinger~Lake*Site,data=meta2, permutations = 999)
-adonis_model$aov.tab#all significant
+anos_mod<-anosim(bc,meta$mine_open,permutations=999)
+summary(anos_mod)#sig
 
-adonis_model <- adonis(tabred~Lake*Min_Depth,data=meta2, permutations = 999)
-adonis_model$aov.tab#lake significant
+adonis_model <- adonis2(bc~pre_post,data=meta, permutations = 999)
+adonis_model#ns
 
-adonis_model <- adonis(hellinger~Treatment,data=meta2, permutations = 999)
-adonis_model$aov.tab#significant
+anos_mod<-anosim(bc,meta$pre_post,permutations=999)
+summary(anos_mod)#ns
 
-dis<-vegdist(tabred,method="bray")
-pcoa<-cmdscale(dis,eig=TRUE)
+pcoa<-cmdscale(bc,eig=TRUE)
 ordiplot(pcoa)
-m<-merge(meta2,pcoa$points,by.x="Row.names",by.y=0)
-m<-m[order(m$Combo,m$Min_Depth),]
-ggplot(m,aes(V1,V2,label=Name2))+geom_point(aes(color=Combo,size=Min_Depth,shape=Treatment))+theme_classic()+geom_text(hjust=1,vjust=1)
-ggplot(m,aes(V1,V2,label=Name2))+geom_point(aes(color=Combo,size=Min_Depth))+theme_classic()+geom_path(aes(group=Combo))
+m<-merge(meta,pcoa$points,by.x="Id_sample",by.y=0)
+ggplot(m,aes(V1,V2))+geom_point(aes(color=mine_open,shape=ID_Site))+theme_classic()
+ggplot(m,aes(V1,V2))+geom_point(aes(color=pre_post,shape=ID_Site))+theme_classic()
 
-#Individual cores
-OD<-c("OSID_2023_A_15b","OSID_2023_A_1b","OSID_2023_A_23b","OSID_2023_A_5b")
-OD<-subset_samples(beta,Name %in% OD)
-dis<-vegdist(otu_table(OD),method="bray")
-pcoa<-cmdscale(dis,eig=TRUE)
+env_sub<-meta[c(16,20,23,24,47,25)]
+row.names(env_sub)<-meta$Row.names
+ev<-envfit(pcoa,env_sub,permutations=999)#year significant. Cu marginal
+arrow.df<-data.frame(ev$vectors$arrows)
+arrow.df<-arrow.df[1:2,]
+arrowmu<-ordiArrowMul(ev)
+arrow_map = aes(xend = Dim1*arrowmu, yend = Dim2*arrowmu, x = 0, y = 0, shape = NULL, color = NULL, 
+                label = row.names(arrow.df))
+label_map = aes(x = 1.2 * Dim1*arrowmu, y = 1.2 * Dim2*arrowmu, shape = NULL, color = NULL, 
+                label = row.names(arrow.df))
+arrowhead=arrow(length=unit(0.03,"npc"))
+
+ggplot(m,aes(V1,V2))+
+  geom_point(aes(color=mine_open,shape=ID_Site))+
+  theme_classic()+
+  geom_segment(arrow_map,size=0.5,data=arrow.df,arrow=arrowhead)+
+  geom_text(label_map,size=4,data=arrow.df)+
+  geom_hline(yintercept=0,linetype="dashed")+
+  geom_vline(xintercept=0,linetype="dashed")
+
+#rel abundance plot of different phyla
+group_ps = tax_glom(beta, taxrank="Phylum")# tax glom to phylum level, only chordata present across most samples
+
+barplot<-plot_bar(group_ps,x="Sampling_Order",fill="Phylum")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  facet_wrap(~ID_Site)+theme_bw()
+
+chord_beta<-subset_taxa(beta,Phylum=="Chordata_7711")#77 taxa
+chord_genus<-tax_glom(chord_beta, taxrank="Genus")# tax glom to genus level
+plot_bar(chord_genus,x="Sampling_Order",fill="Genus")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  facet_wrap(~ID_Site)+theme_bw()
+
+#focus on fish
+acti<-subset_taxa(ps_clean1,Class=="Actinopteri_186623")#76 taxa
+acti<-subset_taxa(acti,Species!="Ptychocheilus_oregonensis_71769")#remove pike minnow not present in Quebec
+acti1<-prune_samples(sample_sums(acti)>2,acti)#16 samples remain
+set.seed(8234)
+actirare<-rarefy_even_depth(acti1,sample.size=min(sample_sums(acti1)))#72 taxa in 16 samples left
+acti_alpha_div <- estimate_richness(actirare, split = TRUE, measure = "Shannon")
+acti_alpha_chao <- estimate_richness(acti1, split = TRUE, measure = "Chao1")
+acti_alpha_simp <- estimate_richness(acti1, split = TRUE, measure = "Simpson")
+acti_meta<-sample_data(actirare)
+acti_meta<-merge(acti_meta,acti_alpha_div,by=0)
+row.names(acti_meta)<-acti_meta$Row.names
+acti_meta$Row.names<-NULL
+acti_meta<-merge(acti_meta,acti_alpha_chao,by=0)
+row.names(acti_meta)<-acti_meta$Row.names
+acti_meta$Row.names<-NULL
+acti_meta<-merge(acti_meta,acti_alpha_simp,by=0)
+row.names(acti_meta)<-acti_meta$Row.names
+acti_meta$Row.names<-NULL
+
+
+sh<-ggplot(data=acti_meta,aes(mine_open,Shannon))+geom_boxplot()+theme_bw()
+ch<-ggplot(data=acti_meta,aes(mine_open,Chao1))+geom_boxplot()+theme_bw()
+si<-ggplot(data=acti_meta,aes(mine_open,Simpson))+geom_boxplot()+theme_bw()
+plot_grid(sh,ch,si,labels=c("A","B","C"))
+
+wilcox.test(Shannon~mine_open,acti_meta)#sig
+wilcox.test(Chao1~mine_open,acti_meta)#sig
+wilcox.test(Simpson~mine_open,acti_meta)#sig
+
+
+ggplot(acti_meta,aes(x=Year,y=Shannon,color=ID_Site,shape=mine_open))+
+  geom_point()+theme_bw()+geom_smooth(method="lm",se=FALSE)+
+  facet_wrap(~ID_Site,scales="free")
+
+fit<-lm(Shannon~Year,acti_meta)
+summary(fit)#ns
+fit<-lm(Chao1~Year,acti_meta)
+summary(fit)#sig negative
+fit<-lm(Simpson~Year,acti_meta)
+summary(fit)#ns
+
+beta_acti<-transform_sample_counts(acti1,function(x) x/sum(x))
+bc_acti<-vegdist(otu_table(beta_acti),method="bray")
+meta_acti<-sample_data(beta_acti)
+adonis_model <- adonis2(bc_acti~meta_acti$mine_open, permutations = 999)
+adonis_model#sig
+
+#fish pcoa
+pcoa<-cmdscale(bc_acti,eig=TRUE)
 ordiplot(pcoa)
-m<-merge(meta,pcoa$points,by.x="Row.names",by.y=0)
-ggplot(m,aes(V1,V2,label=Name2))+geom_point(aes(size=Min_Depth),col="blue")+theme_classic()+geom_text(hjust=1,vjust=1)
-sample_names(OD)<-sample_data(OD)$Name2
-p1<-plot_bar(OD,fill="Family",title="Osisko Deep")
+m<-merge(acti_meta,pcoa$points,by.x="Id_sample",by.y=0)
+ggplot(m,aes(V1,V2))+geom_point(aes(color=mine_open,shape=ID_Site))+theme_classic()
+ggplot(m,aes(V1,V2))+geom_point(aes(color=pre_post,shape=ID_Site))+theme_classic()
 
-OL<-c("OSIL_2023_D_13b","OSIL_2023_D_17b","OSIL_2023_D_1b","OSIL_2023_D_5b","OSIL_2023_D_9b")
-OL<-subset_samples(beta,Name %in% OL)
-dis<-vegdist(otu_table(OL),method="bray")
-pcoa<-cmdscale(dis,eig=TRUE)
-ordiplot(pcoa)
-m<-merge(meta,pcoa$points,by.x="Row.names",by.y=0)
-ggplot(m,aes(V1,V2,label=Name2))+geom_point(aes(size=Min_Depth),col="lightblue")+theme_classic()+geom_text(hjust=1,vjust=1)
-sample_names(OL)<-sample_data(OL)$Name2
-p2<-plot_bar(OL,fill="Family",title="Osisko Littoral")
-  
-DD<-c("DUFD_2023_B_17b","DUFD_2023_B_1b","DUFD_2023_B_21b","DUFD_2023_B_5b","DUFD_2023_B_9b")
-DD<-subset_samples(beta,Name %in% DD)
-dis<-vegdist(otu_table(DD),method="bray")
-pcoa<-cmdscale(dis,eig=TRUE)
-ordiplot(pcoa)
-m<-merge(meta,pcoa$points,by.x="Row.names",by.y=0)
-ggplot(m,aes(V1,V2,label=Name2))+geom_point(aes(size=Min_Depth),col="green")+theme_classic()+geom_text(hjust=1,vjust=1)
-sample_names(DD)<-sample_data(DD)$Name2
-p3<-plot_bar(DD,fill="Family",title="Dufay Deep")
+env_sub<-meta[c(16,20,23,24,47,25)]
+row.names(env_sub)<-meta$Row.names
+env_sub<-subset(env_sub,row.names(env_sub) %in% m$Id_sample)
+row.names(env_sub)==m$Id_sample
 
-DL<-c("DUFL_2023_C_17b","DUFL_2023_C_1b","DUFL_2023_C_29b","DUFL_2023_C_5b","DUFL_2023_C_9b")
-DL<-subset_samples(beta,Name %in% DL)
-dis<-vegdist(otu_table(DL),method="bray")
-pcoa<-cmdscale(dis,eig=TRUE)
-ordiplot(pcoa)
-m<-merge(meta,pcoa$points,by.x="Row.names",by.y=0)
-ggplot(m,aes(V1,V2,label=Name2))+geom_point(aes(size=Min_Depth,shape=Treatment),col="darkgreen")+theme_classic()+geom_text(hjust=1,vjust=1)
-sample_names(DL)<-sample_data(DL)$Name2
-p4<-plot_bar(DL,fill="Family",title="Dufay Littoral")
+ev<-envfit(pcoa,env_sub,permutations=999)#Cu, Al, Ca significant, year marginal
+arrow.df<-data.frame(ev$vectors$arrows)
+arrow.df<-arrow.df[1:4,]
+arrowmu<-ordiArrowMul(ev)
+arrow_map = aes(xend = Dim1*arrowmu, yend = Dim2*arrowmu, x = 0, y = 0, shape = NULL, color = NULL, 
+                label = row.names(arrow.df))
+label_map = aes(x = 1.2 * Dim1*arrowmu, y = 1.2 * Dim2*arrowmu, shape = NULL, color = NULL, 
+                label = row.names(arrow.df))
+arrowhead=arrow(length=unit(0.03,"npc"))
 
-ggarrange(p1,p2,p3,p4,labels=c("A","B","C","D"),ncol=2,nrow=2)
+ggplot(m,aes(V1,V2))+
+  geom_point(aes(color=mine_open,shape=ID_Site))+
+  theme_classic()+
+  geom_segment(arrow_map,size=0.5,data=arrow.df,arrow=arrowhead)+
+  geom_text(label_map,size=4,data=arrow.df)+
+  geom_hline(yintercept=0,linetype="dashed")+
+  geom_vline(xintercept=0,linetype="dashed")
 
-#Titan analysis
-D<-subset_samples(ps_clean6,sample_data(ps_clean6)$Lake=="Dufay")
-Drare<-rarefy_even_depth(D,sample.size=21580)
+anos_mod<-anosim(bc_acti,meta_acti$mine_open,permutations=999)
+summary(anos_mod)#sig
 
-D_clean<-tax_filter(Drare,min_prevalence=3,prev_detection_threshold=3)
+###analyze fish by trophic level
+tax_group<-read.csv("../results/acti1_tax.csv")
+row.names(tax_group)<-tax_group$X
+tax_group$X<-NULL
+tax_tax<-tax_table(tax_group)
+row.names(tax_tax)<-row.names(tax_group)
+colnames(tax_tax)<-colnames(tax_group)
+acti2<-acti1
+tax_table(acti2)<-tax_tax
+plot_bar(acti_spec2,x="Sampling_Order",fill="Species")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  facet_wrap(~ID_Site)+theme_bw()
 
-txa_obj<-otu_table(D_clean)
-env<-sample_data(D_clean)$Year
 
-to<-titan(env,txa_obj,pur.cut=0.95,rel.cut=0.95,numPerm=1000)#number of observations too low
-plot_taxa_ridges(to,z1=FALSE)
-plot_sumz(to,filter=FALSE,cumfrq=FALSE,xmin=1920,xmax=2022)
+plot_bar(acti_spec2,x="Sampling_Order",fill="group")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  facet_wrap(~ID_Site)+theme_bw()
 
-O<-subset_samples(ps_clean6,sample_data(ps_clean6)$Lake=="Osisko")
-Orare<-rarefy_even_depth(O,sample.size=20500)
-O_clean<-tax_filter(Orare,min_prevalence=3,prev_detection_threshold=3)
+####correlations with qPCR data
+acti_spec<-tax_glom(acti1,taxrank="Species")
+acti_cor<-merge(data.frame(otu_table(acti_spec)),meta,by.x=0,by.y="Id_sample")
+#Sander
+cor.test(acti_cor$ASV1,acti_cor$eSAVI2)#sig! 0.73 cor
+plot(acti_cor$ASV1,acti_cor$eSAVI2)
+#Catostomus
+cor.test(acti_cor$ASV3,acti_cor$eCACO4)#sig! 0.77 cor
+plot(acti_cor$ASV3,acti_cor$eCACO4)
+#Perca
+cor.test(acti_cor$ASV4,acti_cor$ePEFL1)#ns
+plot(acti_cor$ASV4,acti_cor$ePEFL1)
+#Esox
+cor.test(acti_cor$ASV8,acti_cor$eESLU1)#sig, 0.998 cor!!!
+plot(acti_cor$ASV8,acti_cor$eESLU1)
 
-txa_obj<-otu_table(O_clean)
-env<-sample_data(O_clean)$Min_Depth
+#random forest for indicator taxa (on species level)
+forest_mat<-as.data.frame(otu_table(acti_spec))
+samp_class<-data.frame(sample_data(acti_spec))
+forest_mat$mine<-samp_class$mine_open
+tax_class<-data.frame(tax_table(acti_spec))
+acti.rf<-randomForest(as.factor(mine)~.,data=forest_mat,importance=TRUE)#OOB error: 6.25
+imp<-importance(acti.rf)
+imp<-merge(tax_class,imp,by=0)
+imp<-imp[rev(order(imp[,12])),]
+#Sander most important, followed by Perca
 
-to<-titan(env,txa_obj,pur.cut=0.95,rel.cut=0.95,numPerm=1000)#number of observations too small
-plot_sumz(to,filter=FALSE,cumfrq=FALSE)
-plot_taxa_ridges(to)#doesn't work because no taxa pass filter
+#export otu table for stamp analysis
+beta_acti_otus<-data.frame(t(otu_table(beta_acti)))
+beta_tax<-data.frame(tax_table(beta_acti))
+beta_m<-merge(beta_tax,beta_acti_otus,by=0)
+beta_m$Row.names<-NULL
+beta_m$group<-NULL
+beta_samp<-data.frame(sample_data(beta_acti))
+beta_samp2<-cbind(beta_samp$Id_sample,beta_samp$Env,beta_samp$mine_open,beta_samp$pre_post)
+write.table(beta_m,"../results/beta_acti_otus.txt",quote=FALSE,sep="\t",row.names=FALSE)
+write.table(beta_samp2,"../results/beta_acti_meta_data.txt",quote=FALSE,sep="\t",row.names=FALSE)
+#stamp: no significant differences for any species between exposed and non-exposed
+#also make stamp file for groups #no significant stamp differences
+
+save.image(file="coi_stats.RData")
+

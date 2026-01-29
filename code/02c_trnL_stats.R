@@ -18,85 +18,109 @@ library(cowplot)
 
 path<-c("D:\\marta/trnL/results")
 setwd("D:/marta/trnL/scripts")
-load(paste0(path,"/ps_base.RData"))
-
-ps_clean1<-subset_taxa(ps_base,!(Class=="NA"))#15 taxa in 10 samples, 9 samples have reads
-ps_clean3<-prune_samples(sample_sums(ps_base)>0,ps_base)
-
-ps_clean2<-prune_samples(sample_sums(ps_clean1)>0,ps_clean1)# only 3 samples remain, so we go ahead with ps_clean3
+load(paste0(path,"/ps_base.RData"))#10 samples, 8 have reads
 
 meta<-read.csv("../DB/eDNA_metadata.csv",h=T)
-row.names(meta)<-meta$Name
+row.names(meta)<-meta$Id_sample
 
-sample_data(ps_clean3)<-meta
-ps_clean4<-subset_samples(ps_clean3,Name!="OSID_2023_A_21")#remove low count sample
+sample_data(ps_base)<-meta
+ps_clean1<-subset_taxa(ps_base,!(Phylum=="NA"))#50 taxa in 10 samples, 8 samples have reads, only one no mine samples
+ps_clean2<-prune_samples(sample_sums(ps_clean1)>0,ps_clean1)
 
-
-#alpha diversity analysis
-set.seed(687887)
-psrare<-rarefy_even_depth(ps_clean4,sample.size=159039)#48 taxa in 8 samples left
+set.seed(8375)
+psrare<-rarefy_even_depth(ps_clean2,sample.size=471)#41 taxa in 8 samples left
 ps_alpha_div <- estimate_richness(psrare, split = TRUE, measure = "Shannon")
-meta<-merge(meta,ps_alpha_div,by=0)
+ps_alpha_chao <- estimate_richness(ps_clean2, split = TRUE, measure = "Chao1")
+ps_alpha_simp <- estimate_richness(ps_clean2, split = TRUE, measure = "Simpson")
+alpha_div<-cbind(ps_alpha_div,ps_alpha_chao,ps_alpha_simp)
+meta<-merge(meta,alpha_div,by=0)
 
-boxplot(Shannon~Site,meta)
-fit<-aov(Shannon~Site,meta)
-anova(fit)#ns
+sh<-ggplot(data=meta,aes(mine_open,Shannon))+geom_boxplot()+theme_bw()
+ch<-ggplot(data=meta,aes(mine_open,Chao1))+geom_boxplot()+theme_bw()
+si<-ggplot(data=meta,aes(mine_open,Simpson))+geom_boxplot()+theme_bw()
+plot_grid(sh,ch,si,labels=c("A","B","C"))
+#no test possible, since there is only one no-mine sample
+sh<-ggplot(data=meta,aes(Env,Shannon))+geom_boxplot()+theme_bw()
+ch<-ggplot(data=meta,aes(Env,Chao1))+geom_boxplot()+theme_bw()
+si<-ggplot(data=meta,aes(Env,Simpson))+geom_boxplot()+theme_bw()
+plot_grid(sh,ch,si,labels=c("A","B","C"))
 
-fit<-lm(Shannon~Min_Depth,meta)
+ggplot(meta,aes(x=Year,y=Shannon,color=ID_Site,shape=mine_open))+
+  geom_point()+theme_bw()+geom_smooth(method="lm",se=FALSE)+
+  facet_wrap(~ID_Site,scales="free")
+
+ggplot(meta,aes(x=Year,y=Shannon,color=ID_Site,shape=mine_open))+
+  geom_point()+theme_bw()+geom_smooth(method="lm",se=FALSE)
+
+ggplot(meta,aes(x=Year,y=Chao1,color=ID_Site,shape=mine_open))+
+  geom_point()+theme_bw()+geom_smooth(method="lm",se=FALSE)+
+  facet_wrap(~ID_Site,scales="free")
+
+ggplot(meta,aes(x=Year,y=Chao1,color=ID_Site,shape=mine_open))+
+  geom_point()+theme_bw()+geom_smooth(method="lm",se=FALSE)
+
+ggplot(meta,aes(x=Year,y=Simpson,color=ID_Site,shape=mine_open))+
+  geom_point()+theme_bw()+geom_smooth(method="lm",se=FALSE)+
+  facet_wrap(~ID_Site,scales="free")
+
+ggplot(meta,aes(x=Year,y=Simpson,color=ID_Site,shape=mine_open))+
+  geom_point()+theme_bw()+geom_smooth(method="lm",se=FALSE)
+
+fit<-lm(Shannon~Env,meta)
+summary(fit)#marginal
+
+fit<-lm(Chao1~Env,meta)
+summary(fit)#sig
+
+fit<-lm(Simpson~Env,meta)
+summary(fit)#marginal
+
+
+OD<-subset(meta,ID_Site=="OSI_DEEP")#4 samples
+OD<-OD[order(OD$Year),]
+OL<-subset(meta,ID_Site=="OSI_LIT")#4 samples
+OL<-OL[order(OL$Year),]
+
+fit<-lm(Shannon~Year,OD)
+summary(fit)#ns
+fit<-lm(Chao1~Year,OD)
+summary(fit)#marginal
+fit<-lm(Simpson~Year,OD)
 summary(fit)#ns
 
-ggplot(meta,aes(x=Min_Depth,y=Shannon,color=Lake,shape=Site))+geom_point()+geom_smooth(method="lm")#increasing diversity with increasing depth
-
-OD<-subset(meta,Combo=="Osisko_Deep")
-OL<-subset(meta,Combo=="Osisko_Littoral")
-
-
-fit<-lm(Shannon~Min_Depth,OD)
+fit<-lm(Shannon~Year,OL)
 summary(fit)#ns
-
-fit<-lm(Shannon~Min_Depth,OL)
+fit<-lm(Chao1~Year,OL)
+summary(fit)#ns
+fit<-lm(Simpson~Year,OL)
 summary(fit)#ns
 
 #beta diversity analysis
-beta<-transform_sample_counts(ps_clean4,function(x) x/sum(x))
+beta<-transform_sample_counts(ps_clean2,function(x) x/sum(x))
 
 tabred<-otu_table(beta)
-hellinger<-decostand(tabred,method="hellinger")
-meta2<-subset(meta,meta$Name %in% row.names(tabred))
-adonis_model <- adonis2(hellinger~Site,data=meta2, permutations = 999)
-adonis_model#ns
+bc<-vegdist(tabred,method="bray")
 
-adonis_model <- adonis(tabred~Min_Depth,data=meta2, permutations = 999)
-adonis_model$aov.tab#ns
-
-dis<-vegdist(tabred,method="bray")
-pcoa<-cmdscale(dis,eig=TRUE)
+pcoa<-cmdscale(bc,eig=TRUE)
 ordiplot(pcoa)
-m<-merge(meta2,pcoa$points,by.x="Row.names",by.y=0)
-m<-m[order(m$Combo,m$Min_Depth),]
-ggplot(m,aes(V1,V2,label=Name2))+geom_point(aes(color=Combo,size=Min_Depth,shape=Treatment))+theme_classic()+geom_text(hjust=1,vjust=1)
+m<-merge(meta,pcoa$points,by.x="Id_sample",by.y=0)
+ggplot(m,aes(V1,V2))+geom_point(aes(color=mine_open,shape=ID_Site))+theme_classic()
+ggplot(m,aes(V1,V2))+geom_point(aes(color=pre_post,shape=ID_Site))+theme_classic()
 
-#Individual cores
-OD<-c("OSID_2023_A_13","OSID_2023_A_1","OSID_2023_A_5","OSID_2023_A_9")
-OD<-subset_samples(beta,Name %in% OD)
-dis<-vegdist(otu_table(OD),method="bray")
-pcoa<-cmdscale(dis,eig=TRUE)
-ordiplot(pcoa)
-m<-merge(meta,pcoa$points,by.x="Row.names",by.y=0)
-ggplot(m,aes(V1,V2,label=Name2))+geom_point(aes(size=Min_Depth),col="blue")+theme_classic()+geom_text(hjust=1,vjust=1)
-ggplot(m,aes(V1,V2,label=Name2))+geom_point(aes(size=Min_Depth),col="blue")+theme_classic()+geom_path(aes(group=1))
-sample_names(OD)<-sample_data(OD)$Name2
-p1<-plot_bar(OD,fill="Family",title="Osisko Deep")
+env_sub<-meta[c(16,20,23,24,47,25)]
+row.names(env_sub)<-meta$Row.names
+ev<-envfit(pcoa,env_sub,permutations=999)#ns
 
-OL<-c("OSIL_2023_D_17","OSIL_2023_D_1","OSIL_2023_D_29","OSIL_2023_D_9")
-OL<-subset_samples(beta,Name %in% OL)
-dis<-vegdist(otu_table(OL),method="bray")
-pcoa<-cmdscale(dis,eig=TRUE)
-ordiplot(pcoa)
-m<-merge(meta,pcoa$points,by.x="Row.names",by.y=0)
-ggplot(m,aes(V1,V2,label=Name2))+geom_point(aes(size=Min_Depth),col="lightblue")+theme_classic()+geom_text(hjust=1,vjust=1)
-ggplot(m,aes(V1,V2,label=Name2))+geom_point(aes(size=Min_Depth),col="lightblue")+theme_classic()+geom_path(aes(group=Combo))
-sample_names(OL)<-sample_data(OL)$Name2
-p2<-plot_bar(OL,fill="Family",title="Osisko Littoral")
+ggplot(m,aes(V1,V2))+
+  geom_point(aes(color=mine_open,shape=ID_Site))+
+  theme_classic()+
+  geom_hline(yintercept=0,linetype="dashed")+
+  geom_vline(xintercept=0,linetype="dashed")
 
-ggarrange(p1,p2,labels=c("A","B"),ncol=2)
+
+#rel abundance plot of different divisions
+group_ps = tax_glom(beta, taxrank="Order")# tax glom to order level
+
+barplot<-plot_bar(group_ps,x="Year",fill="Order")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  facet_wrap(~ID_Site)+theme_bw()

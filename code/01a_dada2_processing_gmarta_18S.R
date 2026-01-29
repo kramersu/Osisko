@@ -145,9 +145,14 @@ taxid <- t(sapply(ids, function(x) {
 colnames(taxid) <- ranks; rownames(taxid) <- getSequences(seqtab.nochim)
 taxid[is.na(taxid)] <- "unassigned" #replace NA with unassigned for later filtering in phyloseq
 
+#try PR2 instead
+set.seed(7870) # Initialize random number generator for reproducibility
+taxa <- assignTaxonomy(dna, "../DB/pr2_version_5.1.0_SSU_dada2.fasta.gz", multithread=FALSE)
+
+
 #handover to phyloseq
 library(phyloseq)
-ps_base<-phyloseq(otu_table(seqtab.nochim,taxa_are_rows=FALSE),tax_table(taxid))#1745 taxa
+ps_base<-phyloseq(otu_table(seqtab.nochim,taxa_are_rows=FALSE),tax_table(taxa))#1745 taxa
 #store sequence in refseq(ps_base)
 dna<-Biostrings::DNAStringSet(taxa_names(ps_base))
 names(dna)<-taxa_names(ps_base)
@@ -155,13 +160,14 @@ ps_base<-merge_phyloseq(ps_base,dna)
 taxa_names(ps_base)<-paste0("ASV",seq(ntaxa(ps_base)))
 ps_base %>%refseq() %>%Biostrings::writeXStringSet("ASV_18S.fna", append=FALSE,compress=FALSE, compression_level=NA, format="fasta")
 
-save.image(file = "dada2_pro_18S_workspace1.RData")
+save.image(file = "dada2_pro_18S_workspace2.RData")
 
 
 #remove  taxa without phylum assignment
-ps_clean<-subset_taxa(ps_base,phylum!="unassigned") #611 taxa remain
+ps_clean<-subset_taxa(ps_base,Phylum!="NA") #1176 taxa remain (only 600 for silva), careful this is actually not phylum but supergroup in pr2
 
 
-save(ps_clean, file ='ps_clean_18S.RData')
+
+save(ps_clean, file ='ps_clean_18S_pr2.RData')
 
 
